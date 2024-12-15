@@ -1,6 +1,6 @@
 [
     {
-        "op": "SinhCustom",
+        "op": "ArgMaxWithValue",
         "language":"cpp",
         "input_desc": [
             {

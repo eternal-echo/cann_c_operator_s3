@@ -7,7 +7,7 @@ namespace optiling {
 constexpr int32_t BLOCK_DIM = 8;
 static ge::graphStatus TilingFunc(gert::TilingContext* context)
 {
-    SinhCustomTilingData tiling;
+    ArgMaxWithValueTilingData tiling;
     uint32_t total_len = context->GetInputShape(0)->GetOriginShape().GetShapeSize();
     context->SetBlockDim(BLOCK_DIM);
     tiling.set_total_len(total_len);
@@ -32,9 +32,9 @@ static ge::graphStatus InferShape(gert::InferShapeContext* context)
 
 
 namespace ops {
-class SinhCustom : public OpDef {
+class ArgMaxWithValue : public OpDef {
 public:
-    explicit SinhCustom(const char* name) : OpDef(name)
+    explicit ArgMaxWithValue(const char* name) : OpDef(name)
     {
         this->Input("x")
             .ParamType(REQUIRED)
@@ -62,5 +62,5 @@ public:
     }
 };
 
-OP_ADD(SinhCustom);
+OP_ADD(ArgMaxWithValue);
 }

@@ -44,9 +44,9 @@ private:
     uint32_t total_length;  // 数据总长度
 };
 
-extern "C" __global__ __aicore__ void sinh_custom(GM_ADDR x, GM_ADDR y, GM_ADDR workspace, GM_ADDR tiling) {
+extern "C" __global__ __aicore__ void arg_max_with_value_plugin(GM_ADDR x, GM_ADDR y, GM_ADDR workspace, GM_ADDR tiling) {
     GET_TILING_DATA(tiling_data, tiling);
-    KernelSinh<half> op;
+    KernelArgMaxWithValue<half> op;
     //补充init和process函数调用内容
     op.Init(x, y, tiling_data.total_len);
     op.Process();
