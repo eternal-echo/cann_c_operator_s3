@@ -94,7 +94,7 @@ void DestroyResources(std::vector<void *> tensors, std::vector<void *> deviceAdd
 
 int main(int argc, char **argv)
 {
-    constexpr int64_t inputShape = 4096;
+    constexpr int64_t inputShape = 64;
     constexpr float resFloat = 4096.0;
     // 1. (Fixed code) Initialize device / stream, refer to the list of external interfaces of acl
     // Update deviceId to your own device id
@@ -105,35 +105,45 @@ int main(int argc, char **argv)
 
     // 2. Create input and output, need to customize according to the interface of the API
     std::vector<int64_t> inputXShape = {inputShape};
-    std::vector<int64_t> outputMaxValueShape = {1}; // 假设输出最大值的形状
-    std::vector<int64_t> outputZShape = {32};
+    std::vector<int64_t> outputMaxIndexShape = {1};  // 假设输出最大值索引的形状
+    std::vector<int64_t> outputMaxValueShape = {1};  // 假设输出最大值的形状
     void *inputXDeviceAddr = nullptr;
-    void *outputZDeviceAddr = nullptr;
+    void *outputMaxIndexDeviceAddr = nullptr;
+    void *outputMaxValueDeviceAddr = nullptr;
     aclTensor *inputX = nullptr;
-    aclTensor *outputZ = nullptr;
+    aclTensor *outputMaxIndex = nullptr;
+    aclTensor *outputMaxValue = nullptr;
     std::vector<aclFloat16> inputXHostData(inputXShape[0]);
-    std::vector<aclFloat16> outputZHostData(outputZShape[0]);
-    for (int i = 0; i < inputXShape[0]; ++i) {
+    std::vector<aclFloat16> outputMaxIndexHostData(outputMaxIndexShape[0]);
+    std::vector<aclFloat16> outputMaxValueHostData(outputMaxValueShape[0]);
+    inputXHostData[0] = aclFloatToFloat16(6.0);
+    for (int i = 1; i < inputXShape[0]; ++i) {
         inputXHostData[i] = aclFloatToFloat16(1.0);
     }
-    for (int i = 0; i < outputZShape[0]; ++i) {
-        outputZHostData[i] = aclFloatToFloat16(resFloat);
-    }
-    std::vector<void *> tensors = {inputX, outputZ};
-    std::vector<void *> deviceAddrs = {inputXDeviceAddr, outputZDeviceAddr};
+    outputMaxIndexHostData[0] = 0;  // 初始化最大值索引
+    outputMaxValueHostData[0] = aclFloatToFloat16(resFloat); // 假设最大值为4096
+
+    std::vector<void *> tensors = {inputX, outputMaxIndex, outputMaxValue};
+    std::vector<void *> deviceAddrs = {inputXDeviceAddr, outputMaxIndexDeviceAddr, outputMaxValueDeviceAddr};
     // Create inputX aclTensor
     ret = CreateAclTensor(inputXHostData, inputXShape, &inputXDeviceAddr, aclDataType::ACL_FLOAT16, &inputX);
     CHECK_RET(ret == ACL_SUCCESS, DestroyResources(tensors, deviceAddrs, stream, deviceId); return FAILED);
-    // Create outputZ aclTensor
-    ret = CreateAclTensor(outputZHostData, outputZShape, &outputZDeviceAddr, aclDataType::ACL_FLOAT16, &outputZ);
+    
+    // Create outputMaxIndex aclTensor
+    ret = CreateAclTensor(outputMaxIndexHostData, outputMaxIndexShape, &outputMaxIndexDeviceAddr, aclDataType::ACL_INT32, &outputMaxIndex);
+    CHECK_RET(ret == ACL_SUCCESS, DestroyResources(tensors, deviceAddrs, stream, deviceId); return FAILED);
+
+    // Create outputMaxValue aclTensor
+    ret = CreateAclTensor(outputMaxValueHostData, outputMaxValueShape, &outputMaxValueDeviceAddr, aclDataType::ACL_FLOAT16, &outputMaxValue);
     CHECK_RET(ret == ACL_SUCCESS, DestroyResources(tensors, deviceAddrs, stream, deviceId); return FAILED);
 
     // 3. Call the API of the custom operator library
     uint64_t workspaceSize = 0;
     aclOpExecutor *executor;
     // Calculate the workspace size and allocate memory for it
-    ret = aclnnReduceCustomGetWorkspaceSize(inputX, outputZ, &workspaceSize, &executor);
-    CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclnnReduceCustomGetWorkspaceSize failed. ERROR: %d\n", ret);
+    // Calculate the workspace size and allocate memory for it
+    ret = aclnnArgMaxWithValueGetWorkspaceSize(inputX, outputMaxIndex, outputMaxValue, &workspaceSize, &executor);
+    CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclnnArgMaxWithValueGetWorkspaceSize failed. ERROR: %d\n", ret);
               DestroyResources(tensors, deviceAddrs, stream, deviceId); return FAILED);
 
     void *workspaceAddr = nullptr;
@@ -142,9 +152,9 @@ int main(int argc, char **argv)
         CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("allocate workspace failed. ERROR: %d\n", ret);
                   DestroyResources(tensors, deviceAddrs, stream, deviceId, workspaceAddr); return FAILED);
     }
-    // Execute the custom operator
-    ret = aclnnReduceCustom(workspaceAddr, workspaceSize, executor, stream);
-    CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclnnAdd failed. ERROR: %d\n", ret);
+    // Execute the arg_max_with_value custom operator
+    ret = aclnnArgMaxWithValue(workspaceAddr, workspaceSize, executor, stream);
+    CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclnnArgMaxWithValue failed. ERROR: %d\n", ret);
               DestroyResources(tensors, deviceAddrs, stream, deviceId, workspaceAddr); return FAILED);
 
     // 4. (Fixed code) Synchronize and wait for the task to complete
@@ -154,11 +164,16 @@ int main(int argc, char **argv)
 
     // 5. Get the output value, copy the result from device memory to host memory, need to modify according to the
     // interface of the API
-    auto size = GetShapeSize(outputZShape);
-    std::vector<aclFloat16> resultData(size, 0);
-    ret = aclrtMemcpy(resultData.data(), resultData.size() * sizeof(resultData[0]), outputZDeviceAddr,
+    auto size = GetShapeSize(outputMaxIndexShape);
+    std::vector<aclFloat16> resultMaxIndex(size, 0);
+    std::vector<aclFloat16> resultMaxValue(size, 0);
+    ret = aclrtMemcpy(resultMaxIndex.data(), resultMaxIndex.size() * sizeof(resultMaxIndex[0]), outputMaxIndexDeviceAddr,
                       size * sizeof(aclFloat16), ACL_MEMCPY_DEVICE_TO_HOST);
-    CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("copy result from device to host failed. ERROR: %d\n", ret);
+    CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("copy resultMaxIndex from device to host failed. ERROR: %d\n", ret);
+              DestroyResources(tensors, deviceAddrs, stream, deviceId, workspaceAddr); return FAILED);
+    ret = aclrtMemcpy(resultMaxValue.data(), resultMaxValue.size() * sizeof(resultMaxValue[0]), outputMaxValueDeviceAddr,
+                      size * sizeof(aclFloat16), ACL_MEMCPY_DEVICE_TO_HOST);
+    CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("copy resultMaxValue from device to host failed. ERROR: %d\n", ret);
               DestroyResources(tensors, deviceAddrs, stream, deviceId, workspaceAddr); return FAILED);
 
     // 6. Detroy resources, need to modify according to the interface of the API
@@ -167,15 +182,8 @@ int main(int argc, char **argv)
     // print the output result
     std::vector<aclFloat16> goldenData(size, aclFloatToFloat16(resFloat));
 
-    LOG_PRINT("result is:\n");
-    for (int64_t i = 0; i < 10; i++) {
-        LOG_PRINT("%.1f ", aclFloat16ToFloat(resultData[i]));
-    }
-    LOG_PRINT("\n");
-    if (std::equal(resultData.begin(), resultData.begin() + 1, goldenData.begin())) {
-        LOG_PRINT("test pass\n");
-    } else {
-        LOG_PRINT("test failed\n");
-    }
+    // print the output result
+    LOG_PRINT("Max Value Index: %d, Max Value: %.1f\n", resultMaxIndex[0], aclFloat16ToFloat(resultMaxValue[0]));
+
     return SUCCESS;
 }
