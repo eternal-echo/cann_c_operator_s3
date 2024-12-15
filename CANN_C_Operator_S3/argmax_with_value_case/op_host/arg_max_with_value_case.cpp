@@ -8,12 +8,17 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context)
 {
 
   ArgMaxWithValueCaseTilingData tiling;
+  // 获取输入数据的形状
   const gert::StorageShape* x1_shape = context->GetInputShape(0);
   int32_t data_sz = 1;
+  // 计算输入数据的总大小
   for (int i = 0; i < x1_shape->GetStorageShape().GetDimNum(); i++)
     data_sz *= x1_shape->GetStorageShape().GetDim(i);
+  // 设置 Tiling 数据的大小
   tiling.set_size(data_sz);
+   // 设置每个块的维度，保持简单，使用一个块大小为 8
   context->SetBlockDim(8);
+  // 将 Tiling 数据保存到 context 中
   tiling.SaveToBuffer(context->GetRawTilingData()->GetData(), context->GetRawTilingData()->GetCapacity());
   context->GetRawTilingData()->SetDataSize(tiling.GetDataSize());
 
